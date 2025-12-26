@@ -1,16 +1,3 @@
-# Copyright 2021 The Matrix.org Foundation C.I.C.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 from synapse.module_api import ModuleApi
 from synapse.module_api.errors import ConfigError
 import logging
@@ -21,6 +8,7 @@ from synapse_user_restrictions.config import (
     CREATE_ROOM,
     INVITE,
     RECEIVE_INVITES,
+    RECEIVE_ALL_INVITES,
     INVITE_ALL,
     JOIN_ROOM,
     ConfigDict,
@@ -45,6 +33,10 @@ class UserRestrictionsModule:
             return UserRestrictionsModuleConfig.from_config(config)
         except (TypeError, ValueError) as e:
             raise ConfigError(f"Failed to parse user restrictions module config: {e}")
+
+    def _get_domain(self, user_id: str) -> str:
+        """Extract the domain part of a Matrix user ID and normalize to lowercase."""
+        return user_id.split(":", 1)[1].lower()
 
     def _apply_rules(self, user_id: str, permission: str) -> bool:
         """
@@ -80,13 +72,25 @@ class UserRestrictionsModule:
     async def callback_user_may_invite(
         self, inviter: str, invitee: str, room_id: str
     ) -> bool:
-        return (
-            self._apply_rules(inviter, INVITE)
-            and (
-                self._apply_rules(inviter, INVITE_ALL)
-                or self._apply_rules(invitee, RECEIVE_INVITES)
-            )
-        )
+        # Inviter must have basic invite permission
+        if not self._apply_rules(inviter, INVITE):
+            return False
+
+        # Inviter with invite_all bypasses all invitee checks
+        if self._apply_rules(inviter, INVITE_ALL):
+            return True
+
+        # Invitee with receive_all_invites accepts from any server
+        if self._apply_rules(invitee, RECEIVE_ALL_INVITES):
+            return True
+
+        # Invitee with receive_invites accepts only from local_homeservers
+        if self._apply_rules(invitee, RECEIVE_INVITES):
+            inviter_domain = self._get_domain(inviter)
+            return inviter_domain in self._config.local_homeservers
+
+        # Otherwise denied
+        return False
 
     async def callback_user_may_join_room(self, user: str, room_id: str, is_invited: bool) -> bool:
         logger.info(f"Checking {user} for {room_id}, is_invited={is_invited}")
