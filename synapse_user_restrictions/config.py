@@ -1,16 +1,3 @@
-# Copyright 2021 The Matrix.org Foundation C.I.C.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import enum
 import re
 from enum import Enum
@@ -127,6 +114,7 @@ class UserRestrictionsModuleConfig:
     """
     rules: List[RegexMatchRule]
     default_deny: Set[str]
+    local_homeservers: Set[str]
 
     @staticmethod
     def from_config(config_dict: ConfigDict) -> "UserRestrictionsModuleConfig":
@@ -152,15 +140,33 @@ class UserRestrictionsModuleConfig:
                 default_deny, "'default_deny' should be a list of strings."
             )
             check_all_permissions_understood(default_deny)
+            default_deny_set = set(default_deny)
+        else:
+            default_deny_set = set()
+
+        local_hs = config_dict.get("local_homeservers")
+        if local_hs is not None:
+            if not isinstance(local_hs, list):
+                raise ValueError("'local_homeservers' should be a list (or unspecified).")
+            local_hs_list = check_list_elements_are_strings(
+                local_hs, "'local_homeservers' should be a list of strings."
+            )
+            local_homeservers_set = {hs.lower() for hs in local_hs_list}
+        else:
+            local_homeservers_set = set()
 
         return UserRestrictionsModuleConfig(
             rules=rules,
-            default_deny=set(default_deny) if default_deny is not None else set(),
+            default_deny=default_deny_set,
+            local_homeservers=local_homeservers_set,
         )
 
 INVITE = "invite"
 CREATE_ROOM = "create_room"
 RECEIVE_INVITES = "receive_invites"
+RECEIVE_ALL_INVITES = "receive_all_invites"
 INVITE_ALL = "invite_all"
 JOIN_ROOM = "join_room"
-ALL_UNDERSTOOD_PERMISSIONS = frozenset({INVITE, CREATE_ROOM, RECEIVE_INVITES, INVITE_ALL, JOIN_ROOM})
+ALL_UNDERSTOOD_PERMISSIONS = frozenset({
+    INVITE, CREATE_ROOM, RECEIVE_INVITES, RECEIVE_ALL_INVITES, INVITE_ALL, JOIN_ROOM
+})
